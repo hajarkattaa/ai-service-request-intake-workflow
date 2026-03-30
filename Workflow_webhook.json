@@ -1,0 +1,188 @@
+{
+  "name": "AI Service Request Intake Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-3.5-turbo",
+          "mode": "list"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=You are helping an operations team process incoming customer service requests.\n\nExtract the request into valid JSON only.\nDo not include explanations.\nDo not include markdown.\n\nReturn exactly these fields:\nservice_type\nrequested_date\nrequested_time\nlocation\nduration\nurgency\ncompleteness\nai_summary\nstatus\n\nRules:\n- service_type: short label like \"house cleaning\"\n- requested_date: extract if present, otherwise \"unknown\"\n- requested_time: extract if present, otherwise \"unknown\"\n- location: extract if present, otherwise \"unknown\"\n- duration: extract if present, otherwise \"unknown\"\n- urgency:\n  - \"high\" if request is for today or tomorrow\n  - \"medium\" if soon\n  - \"low\" otherwise\n- completeness:\n  - \"complete\" if service type + time/date + location exist\n  - \"incomplete\" otherwise\n- ai_summary: one clean sentence summarizing the request\n- status:\n  - \"ready_for_review\" if complete\n  - \"missing_information\" if incomplete\n\nCustomer request:\n{{$json.body.raw_request}}"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2,
+      "position": [400, 0],
+      "name": "AI Processing"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.output[0].content[0].text;\n\nlet parsed;\n\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  throw new Error(\"Failed to parse JSON: \" + text);\n}\n\nconst rawRequest = $('Webhook').first().json.body.raw_request;\n\nreturn [\n  {\n    json: {\n      raw_request: rawRequest,\n      ...parsed\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 0],
+      "name": "Parse & Structure Data"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{$json.completeness}}",
+              "rightValue": "complete",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 0],
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "service-request"
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [150, 0],
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "channel",
+              "value": "WhatsApp",
+              "type": "string"
+            },
+            {
+              "name": "message_type",
+              "value": "clarification",
+              "type": "string"
+            },
+            {
+              "name": "recipient_type",
+              "value": "customer",
+              "type": "string"
+            },
+            {
+              "name": "whatsapp_message",
+              "value": "Hello, please provide date, time, and location.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1200, 100],
+      "name": "Send WhatsApp Clarification"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "channel",
+              "value": "WhatsApp",
+              "type": "string"
+            },
+            {
+              "name": "message_type",
+              "value": "confirmation",
+              "type": "string"
+            },
+            {
+              "name": "recipient_type",
+              "value": "customer",
+              "type": "string"
+            },
+            {
+              "name": "whatsapp_message",
+              "value": "Your request is confirmed and being processed.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1200, -100],
+      "name": "Send WhatsApp Confirmation"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "job_status",
+              "value": "pending_assignment",
+              "type": "string"
+            },
+            {
+              "name": "assigned_team",
+              "value": "operations",
+              "type": "string"
+            },
+            {
+              "name": "priority",
+              "value": "={{$json.urgency}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1400, -100],
+      "name": "Create Job (Simulated)"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetName": "Requests"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1600, -100],
+      "name": "Append row in sheet"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "AI Processing" }]]
+    },
+    "AI Processing": {
+      "main": [[{ "node": "Parse & Structure Data" }]]
+    },
+    "Parse & Structure Data": {
+      "main": [[{ "node": "If" }]]
+    },
+    "If": {
+      "main": [
+        [{ "node": "Send WhatsApp Confirmation" }],
+        [{ "node": "Send WhatsApp Clarification" }]
+      ]
+    },
+    "Send WhatsApp Confirmation": {
+      "main": [[{ "node": "Create Job (Simulated)" }]]
+    },
+    "Create Job (Simulated)": {
+      "main": [[{ "node": "Append row in sheet" }]]
+    }
+  }
+}
